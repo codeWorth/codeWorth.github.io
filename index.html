@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<style>
+			html, body {
+				padding: 0px;
+				margin: 0px;
+				overflow: auto;
+			}
+
+			#wrapper {
+				width: 100vw;
+				height: 100vh;
+				background-color: lightgray;
+				position: absolute;
+				top: 0px;
+				left: 0px;
+			}
+
+			#setup {
+				display: none;
+				position: absolute;
+				z-index: 10;
+				top: 0px;
+				left: 0px;
+				width: 100%;
+				height: 100%;
+				background-color: rgba(0, 0, 0, 0.8);
+			}
+			#setupWindow {
+				margin: 20px auto;
+				padding: 10px;
+				width: 250px;
+				height: 190px;
+				background-color: white;
+				border-radius: 5px;
+			}
+			#setupWindow h2 {
+				margin: 0px;
+				font-family: Verdana, Tahoma, sans-serif;
+				text-align: center;
+			}
+			#setupWindow input {
+				margin: 10px 10px 10px 0px;
+			}
+
+			#canvasHolder {
+				position: relative;
+				display: block;
+				width: min(100vw, 100vh);
+				height: 100vh;
+				margin: 0px auto;
+				padding: 0px;
+			}
+
+			#canvasBottom {
+				margin: 0px;
+				width: min(100vw, 100vh);
+				height: min(100vw, 100vh);
+				position: absolute;
+				bottom: 0px;
+				overflow: hidden;
+			}
+
+			#draw {
+				position: absolute;
+				width: 100%;
+				height: 100%;
+				top: 0%;
+				left: 0%;
+				background-color: black;
+			}
+
+			#info {
+				z-index: 5;
+				position: absolute;
+				top: 10px;
+				left: 10px;
+				background-color: rgba(0, 0, 0, 0.5);
+				color: white;
+				font-size: 10pt;
+				width: 250px;
+				font-family: Verdana, Tahoma, sans-serif;
+				padding: 3px;
+			}
+
+			#params {
+				z-index: 5;
+				position: absolute;
+				top: 10px;
+				right: 10px;
+				background-color: rgba(0, 0, 0, 0.5);
+				color: white;
+				font-size: 10pt;
+				width: 250px;
+				font-family: Verdana, Tahoma, sans-serif;
+				padding: 3px;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="wrapper">
+			<div id="setup">
+				<div id="setupWindow">
+					<h2>Setup:</h2>
+					Count: <input type="number" id="setupCount" value="500"><br/>
+					Radius: <input type="number" id="setupRadius" value="4"><br/>
+					Speed: <input type="number" id="setupSpeed" value="100"><br/>
+					<input type="button" value="Initialize" id="setupInit"><input type="button" value="Cancel" id="setupCancel">
+				</div>
+			</div>
+			<div id="info"></div>
+			<div id="params">
+				Speed: <input type="range" min="1" max="80" value="60" id="speed"/><br/>
+				Gravity: <input type="range" min="0" max="60" value="0" id="gravity"/><br/>
+				Attraction: <input type="range" min="-50" max="50" value="5" id="attraction"/><br/>
+				Loss: <input type="range" min="800" max="1000" value="970" id="loss"/><br/>
+				<br/>
+				<input type="button" value="Pause" id="pauseButton"/>
+				<input type="button" value="Restart" id="restartButton"/>
+			</div>
+			<div id="canvasHolder">
+				<div id="canvasBottom">
+					<canvas id="draw"></canvas>
+				</div>
+			</div>
+		</div>
+		<script type="text/javascript">
+
+			const speedSlider = document.getElementById("speed");
+			const gravitySlider = document.getElementById("gravity");
+			const attractionSlider = document.getElementById("attraction");
+			const lossSlider = document.getElementById("loss");
+			const pauseButton = document.getElementById("pauseButton");
+			const restartButton = document.getElementById("restartButton");
+
+			const info = document.getElementById("info");
+			const canvas = document.getElementById("draw");
+			const canvasBottom = document.getElementById("canvasBottom");
+			canvas.width = Math.min(window.innerWidth*2, window.innerHeight*2);
+			canvas.height = canvas.width;
+			const ctx = canvas.getContext("2d");
+			ctx.webkitImageSmoothingEnabled = false;
+			ctx.mozImageSmoothingEnabled = false;
+			ctx.imageSmoothingEnabled = false;
+
+			const setupWindow = document.getElementById("setup");
+			const setupCount = document.getElementById("setupCount");
+			const setupRadius = document.getElementById("setupRadius");
+			const setupSpeed = document.getElementById("setupSpeed");
+			const setupInitButton = document.getElementById("setupInit");
+			const setupCancelButton = document.getElementById("setupCancel");
+
+			let SPEED = parseInt(speedSlider.value) / 10;
+			let ENERGY_LOSS = parseInt(lossSlider.value) / 1000;
+			let ATTRACTION = parseInt(attractionSlider.value) / 1000;
+			let GRAVITY = parseInt(gravitySlider.value);
+
+			speedSlider.addEventListener("input", event => {
+				SPEED = parseInt(speedSlider.value) / 10;
+			});
+			gravitySlider.addEventListener("input", event => {
+				GRAVITY = parseInt(gravitySlider.value);
+			});
+			attractionSlider.addEventListener("input", event => {
+				ATTRACTION = parseInt(attractionSlider.value) / 1000;
+			});
+			lossSlider.addEventListener("input", event => {
+				ENERGY_LOSS = parseInt(lossSlider.value) / 1000;
+			});
+
+			pauseButton.addEventListener("click", event => {
+				if (physicsInterval == null) {
+					physicsInterval = setInterval(physics, 0);
+					pauseButton.value = "Pause";
+				} else {
+					clearInterval(physicsInterval);
+					physicsInterval = null;
+					pauseButton.value = "Play";
+					time = -1;
+				}
+			});
+
+			window.addEventListener("resize", event => {
+				let newSize = Math.min(window.innerWidth*2, window.innerHeight*2);
+				if (newSize > canvas.width) {
+					canvas.width = newSize;
+					canvas.height = newSize;
+				}
+			});
+
+			let mouseX = 0;
+			let mouseY = 0;
+			let offX = 0;
+			let offY = 0;
+			let zoom = 1;
+			let mousedown = false;
+			const SCALE_FACTOR = 1.1;
+
+			let time = -1;
+			let maxdt = 0;
+			let avdt = 0;
+			let dtCount = 0;
+			let ke = 0;
+
+			function updateOffset() {
+				let box = canvasBottom.getBoundingClientRect();
+
+				if (offX > 0) {
+					offX = 0;
+				} else if (offX + zoom < 1) {
+					offX = 1 - zoom;
+				}
+				if (offY > 0) {
+					offY = 0;
+				} else if (offY + zoom < 1) {
+					offY = 1 - zoom;
+				}
+				canvas.style.left = (offX * 100).toString() + "%";
+				canvas.style.top = (offY * 100).toString() + "%";
+			}
+
+			canvas.addEventListener("mousedown", event => mousedown = true);
+			document.addEventListener("mouseup", event => mousedown = false);
+			document.addEventListener("mousemove", event => {
+				let box = canvasBottom.getBoundingClientRect();
+
+				if (mousedown) {
+					let dx = event.clientX - box.x - mouseX;
+					let dy = event.clientY - box.y - mouseY
+					offX += dx / box.width;
+					offY += dy / box.height;
+					updateOffset();
+				}
+
+				mouseX = event.clientX - box.x;
+				mouseY = event.clientY - box.y;
+			});
+			canvas.addEventListener("wheel", event => {
+				// negative means zoom in, positive means zoom out
+				let box = canvasBottom.getBoundingClientRect();
+				let oldZoom = zoom;
+				if (event.deltaY < 0) {
+					zoom *= SCALE_FACTOR;
+					if (zoom > 8) {
+						zoom = 8;
+					}
+				} else  {
+					zoom /= SCALE_FACTOR;
+					if (zoom < 1) {
+						zoom = 1;
+					}
+				}
+
+				canvas.style.width = (zoom * 100).toString() + "%";
+				canvas.style.height = (zoom * 100).toString() + "%";
+
+				offX = mouseX/box.width - (mouseX/box.width - offX) / oldZoom * zoom;
+				offY = mouseY/box.height - (mouseY/box.height - offY) / oldZoom * zoom;
+				updateOffset();
+			});
+
+			let balls = [];
+			let setupCountVal, setupRadiusVal, setupSpeedVal;
+			function setup(count, radius, speed) {
+				setupCountVal = count;
+				setupRadiusVal = radius;
+				setupSpeedVal = speed;
+				balls.length = 0;
+				for (var i = 0; i < count; i++) {
+					balls.push({
+						x: Math.random() * canvas.width,
+						y: Math.random() * canvas.height,
+						vx: (Math.random() - 0.5) * 2 * speed,
+						vy: (Math.random() - 0.5) * 2 * speed,
+						ax: 0,
+						ay: 0,
+						r: radius
+					});
+				}
+				time = -1;
+				maxdt = 0;
+				avdt = 0;
+				dtCount = 0;
+				ke = 0;
+			}
+			setup(500, 4, 100);
+
+			restartButton.addEventListener("click", event => {
+				if (physicsInterval != null) {
+					pauseButton.click();
+				}
+
+				setupWindow.style.display = "block";
+				setupCount.value = setupCountVal.toString();
+				setupRadius.value = setupRadiusVal.toString();
+				setupSpeed.value = setupSpeedVal.toString();
+			});
+			setupInitButton.addEventListener("click", event => {
+				let count = parseInt(setupCount.value);
+				let radius = parseInt(setupRadius.value);
+				let speed = parseInt(setupSpeed.value);
+				if (
+					count <= 0 || Math.floor(count) != count ||
+					radius <= 0 || Math.floor(radius) != radius ||
+					speed < 0
+				) {
+					alert("Invalid setup values");
+					return;
+				}
+
+				setup(count, radius, speed);
+				setupWindow.style.display = "none";
+				pauseButton.click();
+			});
+			setupCancelButton.addEventListener("click", event => {
+				setupWindow.style.display = "none";
+			});
+
+			function draw() {
+				ctx.clearRect(0, 0, canvas.width, canvas.height);
+				ctx.fillStyle = "white";
+				ctx.beginPath();
+				for (let i = 1; i < balls.length; i++) {
+					let ball = balls[i];
+					let x = Math.floor(ball.x);
+					let y = Math.floor(ball.y);
+					ctx.moveTo(x, y);
+					ctx.arc(x, y, ball.r, 0, Math.PI*2, true);
+				}
+				ctx.closePath();
+				ctx.fill();
+
+				ctx.fillStyle = "red";
+				ctx.beginPath();
+				let ball = balls[0];
+				let x = Math.floor(ball.x);
+				let y = Math.floor(ball.y);
+				ctx.moveTo(x, y);
+				ctx.arc(x, y, ball.r, 0, Math.PI*2, true);
+				ctx.closePath();
+				ctx.fill();
+
+				info.innerText = 
+					"Max: " + maxdt.toString() + " ms" + 
+					"\nAvg: " + (avdt / dtCount).toString() + " ms" + 
+					"\nKe: " + ke.toString() + 
+					"\n" + 
+					"\nSpeed: " + SPEED.toString() + 
+					"\nGravity: " + GRAVITY.toString() + 
+					"\nAttraction: " + ATTRACTION.toString() + 
+					"\nLoss: " + ENERGY_LOSS.toString()
+				
+				window.requestAnimationFrame(draw);
+			}
+			window.requestAnimationFrame(draw);
+
+			function physics() {
+				if (time == -1) {
+					time = performance.now();
+					return;
+				}
+
+				let timePrime = performance.now();
+				let dt = (timePrime - time) / 1000 * SPEED;
+				time = timePrime;
+
+				ke = 0;
+				for (let i = 0; i < balls.length; i++) {
+					let ball = balls[i];
+					let v = Math.sqrt(ball.vx*ball.vx + ball.vy*ball.vy);
+					ke += v*v / 2;
+				}
+
+				for (let i = 0; i < balls.length; i++) {
+					let ball = balls[i];
+					ball.ax = 0;
+					ball.ay = GRAVITY;
+
+					if (ball.x < ball.r) {
+						ball.x = ball.r;
+						ball.vx = Math.abs(ball.vx);
+						ball.ax = 0;
+					} else if (ball.x >= canvas.width - ball.r) {
+						ball.x = canvas.width - ball.r;
+						ball.vx = -Math.abs(ball.vx);
+						ball.ax = 0;
+					}
+					if (ball.y < ball.r) {
+						ball.y = ball.r;
+						ball.vy = Math.abs(ball.vy);
+						ball.ay = 0;
+					} else if (ball.y >= canvas.height - ball.r) {
+						ball.y = canvas.height - ball.r;
+						ball.vy = -Math.abs(ball.vy);
+						ball.ay = 0;
+					}
+				}
+
+				for (let i = 0; i < balls.length; i++) {
+					let ballA = balls[i];
+					for (let j = i+1; j < balls.length; j++) {
+						let ballB = balls[j];
+
+						let dx = ballA.x - ballB.x;
+						let dy = ballA.y - ballB.y;
+						let r = ballA.r + ballB.r;
+
+						let dx2 = dx*dx;
+						let dy2 = dy*dy;
+						let r2 = r*r;
+
+						ballA.ax += -ATTRACTION * dx/r2;
+						ballA.ay += -ATTRACTION * dy/r2;
+
+						if (dx2 + dy2 < r2) {
+							let adx = Math.abs(dx);
+							let ady = Math.abs(dy);
+							let dxPrime, dyPrime;
+							if (adx == 0) {
+								dyPrime = Math.sqrt(r2 / (1 + dx2/dy2));
+								dxPrime = adx / ady * dyPrime;
+							} else {
+								dxPrime = Math.sqrt(r2 / (1 + dy2/dx2));
+								dyPrime = ady / adx * dxPrime;
+							}
+
+							let ddx = dxPrime - adx;
+							let ddy = dyPrime - ady;
+							if (ballA.x < ballB.x) {
+								ballA.x -= ddx/2;
+								ballB.x += ddx/2;
+							} else {
+								ballA.x += ddx/2;
+								ballB.x -= ddx/2;
+							}
+							if (ballA.y < ballB.y) {
+								ballA.y -= ddy/2;
+								ballB.y += ddy/2;
+							} else {
+								ballA.y += ddy/2;
+								ballB.y -= ddy/2;
+							}
+
+							let tanX = ballA.y - ballB.y; // line tangent to collision point
+							let tanY = -(ballA.x - ballB.x);
+							let tangentLen = Math.sqrt(tanX*tanX + tanY*tanY);
+							tanX /= tangentLen; // normalize
+							tanY /= tangentLen;
+
+							let avAlongTan = ballA.vx * tanX + ballA.vy * tanY;
+							let avPerpTanX = ballA.vx - avAlongTan * tanX;
+							let avPerpTanY = ballA.vy - avAlongTan * tanY;
+							let bvAlongTan = ballB.vx * tanX + ballB.vy * tanY;
+							let bvPerpTanX = ballB.vx - bvAlongTan * tanX;
+							let bvPerpTanY = ballB.vy - bvAlongTan * tanY;
+
+							ballA.vx = avAlongTan * tanX + bvPerpTanX;
+							ballA.vy = avAlongTan * tanY + bvPerpTanY;
+							ballB.vx = bvAlongTan * tanX + avPerpTanX;
+							ballB.vy = bvAlongTan * tanY + avPerpTanY;
+
+							ballA.vx *= ENERGY_LOSS;
+							ballA.vy *= ENERGY_LOSS;
+							ballB.vx *= ENERGY_LOSS;
+							ballB.vy *= ENERGY_LOSS;
+
+							ballA.ax = 0;
+							ballA.ay = 0;
+							ballB.ax = 0;
+							ballB.ay = 0;
+						}
+					}
+				}
+
+				for (let i = 0; i < balls.length; i++) {
+					let ball = balls[i];
+					ball.vx += ball.ax * dt;
+					ball.vy += ball.ay * dt;
+					ball.x += ball.vx * dt;
+					ball.y += ball.vy * dt;
+				}
+
+				dtCount++;
+				let DT = performance.now() - timePrime;
+				avdt += DT;	
+				if (DT > maxdt) {
+					maxdt = DT;
+				}
+
+			}
+
+			let physicsInterval = window.setInterval(physics, 0);
+
+		</script>
+	</body>
+</html>
